@@ -103,6 +103,8 @@ def get_index(keyword, page, start_date=None, end_date=None):
         data['ft'] = start_date
     if end_date:
         data['et'] = end_date
+    if start_date or end_date:
+        data['tsn'] = 5
     queries = urlencode(data)
     url = base_url + queries
     html = get_html(url)
