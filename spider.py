@@ -1,6 +1,7 @@
 from urllib.parse import urlencode
 import pymongo
 import requests
+import time
 from lxml.etree import XMLSyntaxError
 from requests.exceptions import ConnectionError
 from pyquery import PyQuery as pq
@@ -18,6 +19,31 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36'
 }
 
+# 起止日期
+start_date = '2017-1-1'
+end_date = '2017-10-19'
+# 日期格式
+format = '%Y-%m-%d'
+
+
+def get_date_range():
+    """
+    获取日期列表，从start_date到end_date
+    :return:
+    """
+    start_time = time.mktime(time.strptime(start_date, format))
+    end_time = time.mktime(time.strptime(end_date, format))
+    print(start_time, end_time)
+    
+    for timestamp in range(int(start_time), int(end_time), 60 * 60 * 24):
+        date = time.strftime(format, time.localtime(timestamp))
+        yield date
+
+
+# 日期列表
+dates = list(get_date_range())
+
+# 代理
 proxy = None
 
 
@@ -27,12 +53,15 @@ def get_proxy():
         if response.status_code == 200:
             return response.text
         return None
-    except ConnectionError:
+    except ConnectionError as e:
+        print('Ger Proxy Error', e.args)
         return None
+
 
 def get_html(url, count=1):
     print('Crawling', url)
     print('Trying Count', count)
+    headers['Referer'] = url
     global proxy
     if count >= MAX_COUNT:
         print('Tried Too Many Counts')
@@ -64,23 +93,28 @@ def get_html(url, count=1):
         return get_html(url, count)
 
 
-
-def get_index(keyword, page):
+def get_index(keyword, page, start_date=None, end_date=None):
     data = {
         'query': keyword,
         'type': 2,
         'page': page
     }
+    if start_date:
+        data['ft'] = start_date
+    if end_date:
+        data['et'] = end_date
     queries = urlencode(data)
     url = base_url + queries
     html = get_html(url)
     return html
+
 
 def parse_index(html):
     doc = pq(html)
     items = doc('.news-box .news-list li .txt-box h3 a').items()
     for item in items:
         yield item.attr('href')
+
 
 def get_detail(url):
     try:
@@ -90,6 +124,7 @@ def get_detail(url):
         return None
     except ConnectionError:
         return None
+
 
 def parse_detail(html):
     try:
@@ -109,6 +144,7 @@ def parse_detail(html):
     except XMLSyntaxError:
         return None
 
+
 def save_to_mongo(data):
     if db['articles'].update({'title': data['title']}, {'$set': data}, True):
         print('Saved to Mongo', data['title'])
@@ -117,18 +153,19 @@ def save_to_mongo(data):
 
 
 def main():
-    for page in range(1, 101):
-        html = get_index(KEYWORD, page)
-        if html:
-            article_urls = parse_index(html)
-            for article_url in article_urls:
-                article_html = get_detail(article_url)
-                if article_html:
-                    article_data = parse_detail(article_html)
-                    print(article_data)
-                    if article_data:
-                        save_to_mongo(article_data)
-
+    # 依次取出，按天爬取
+    for date in dates:
+        for page in range(1, 101):
+            html = get_index(KEYWORD, page, date, date)
+            if html:
+                article_urls = parse_index(html)
+                for article_url in article_urls:
+                    article_html = get_detail(article_url)
+                    if article_html:
+                        article_data = parse_detail(article_html)
+                        print(article_data)
+                        if article_data:
+                            save_to_mongo(article_data)
 
 
 if __name__ == '__main__':
